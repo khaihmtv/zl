@@ -1,0 +1,32 @@
+services:
+  # Next.js Frontend
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:/app/db/zalo-bot.db
+      - ZALO_BOT_URL=http://zalo-bot:3003
+    volumes:
+      - web-db:/app/db
+    depends_on:
+      - zalo-bot
+    restart: unless-stopped
+
+  # Zalo Bot Mini Service (Playwright)
+  zalo-bot:
+    build: ./mini-services/zalo-bot
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+    volumes:
+      - zalo-bot-data:/app/data
+    # Required for Chromium in Docker
+    shm_size: '2gb'
+    restart: unless-stopped
+
+volumes:
+  web-db:
+  zalo-bot-data:

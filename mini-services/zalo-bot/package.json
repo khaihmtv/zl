@@ -1,0 +1,14 @@
+{
+  "name": "zalo-bot-service",
+  "version": "1.0.0",
+  "description": "Zalo Bot Mini Service - Playwright-based Zalo automation",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "playwright": "^1.52.0"
+  }
+}

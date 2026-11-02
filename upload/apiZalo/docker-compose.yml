@@ -1,0 +1,12 @@
+services:
+  zalo-bot:
+    build: .
+    container_name: zalo-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    volumes:
+      - ./data/session.json:/app/session.json
+      - ./data/logs.json:/app/logs.json

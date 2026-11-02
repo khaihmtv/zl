@@ -1,0 +1,29 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MessageLog {
+  id        String   @id @default(cuid())
+  to        String
+  message   String
+  status    String   @default("pending")
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model PaymentRecord {
+  id        String    @id @default(cuid())
+  phone     String
+  name      String?
+  amount    Int
+  note      String?
+  sent      Boolean   @default(false)
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+}

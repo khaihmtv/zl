@@ -1,0 +1,788 @@
+     1→"use client";
+     2→
+     3→import { useState, useCallback, useEffect } from "react";
+     4→import {
+     5→  Card,
+     6→  CardContent,
+     7→  CardHeader,
+     8→  CardTitle,
+     9→  CardDescription,
+    10→} from "@/components/ui/card";
+    11→import { Button } from "@/components/ui/button";
+    12→import { Input } from "@/components/ui/input";
+    13→import { Textarea } from "@/components/ui/textarea";
+    14→import { Label } from "@/components/ui/label";
+    15→import { Badge } from "@/components/ui/badge";
+    16→import { Separator } from "@/components/ui/separator";
+    17→import {
+    18→  Dialog,
+    19→  DialogContent,
+    20→  DialogHeader,
+    21→  DialogTitle,
+    22→  DialogFooter,
+    23→} from "@/components/ui/dialog";
+    24→import {
+    25→  Package,
+    26→  Plus,
+    27→  Trash2,
+    28→  Send,
+    29→  Loader2,
+    30→  ShoppingCart,
+    31→  Users,
+    32→  Search,
+    33→  ChevronDown,
+    34→  ChevronUp,
+    35→  Phone,
+    36→  User,
+    37→  TrendingUp,
+    38→  FileText,
+    39→  MessageSquare,
+    40→  CheckCircle2,
+    41→  XCircle,
+    42→} from "lucide-react";
+    43→import { useToast } from "@/hooks/use-toast";
+    44→
+    45→// ---- Types ----
+    46→interface OrderItem {
+    47→  name: string;
+    48→  quantity: string;
+    49→  price: string;
+    50→}
+    51→
+    52→interface Order {
+    53→  id: string;
+    54→  customerId: string;
+    55→  totalAmount: number;
+    56→  note: string | null;
+    57→  sentAt: string | null;
+    58→  sentTo: string | null;
+    59→  createdAt: string;
+    60→  customer: { id: string; phone: string; name: string };
+    61→  items: { id: string; name: string; quantity: number; price: number; total: number }[];
+    62→}
+    63→
+    64→interface CustomerSummary {
+    65→  id: string;
+    66→  phone: string;
+    67→  name: string;
+    68→  note: string | null;
+    69→  totalOrders: number;
+    70→  totalSpent: number;
+    71→  lastOrderDate: string | null;
+    72→  lastOrderAmount: number;
+    73→}
+    74→
+    75→function formatVND(n: number): string {
+    76→  return new Intl.NumberFormat("vi-VN").format(n) + "đ";
+    77→}
+    78→
+    79→interface OrderPanelProps {
+    80→  loggedIn: boolean;
+    81→}
+    82→
+    83→// Sub-tab: Tạo đơn hàng
+    84→function CreateOrderForm({
+    85→  loggedIn,
+    86→  onCreated,
+    87→}: {
+    88→  loggedIn: boolean;
+    89→  onCreated: () => void;
+    90→}) {
+    91→  const [phone, setPhone] = useState("");
+    92→  const [customerName, setCustomerName] = useState("");
+    93→  const [sentTo, setSentTo] = useState("");
+    94→  const [note, setNote] = useState("");
+    95→  const [items, setItems] = useState<OrderItem[]>([
+    96→    { name: "", quantity: "1", price: "" },
+    97→  ]);
+    98→  const [submitting, setSubmitting] = useState(false);
+    99→  const [autoSend, setAutoSend] = useState(false);
+   100→  const { toast } = useToast();
+   101→
+   102→  const addItem = () => setItems([...items, { name: "", quantity: "1", price: "" }]);
+   103→
+   104→  const removeItem = (idx: number) => {
+   105→    if (items.length <= 1) return;
+   106→    setItems(items.filter((_, i) => i !== idx));
+   107→  };
+   108→
+   109→  const updateItem = (idx: number, field: keyof OrderItem, value: string) => {
+   110→    const updated = [...items];
+   111→    updated[idx] = { ...updated[idx], [field]: value };
+   112→    setItems(updated);
+   113→  };
+   114→
+   115→  const grandTotal = items.reduce((s, item) => {
+   116→    const qty = parseInt(item.quantity) || 0;
+   117→    const price = parseInt(item.price) || 0;
+   118→    return s + qty * price;
+   119→  }, 0);
+   120→
+   121→  const handleSubmit = async () => {
+   122→    if (!phone.trim()) {
+   123→      toast({ title: "Lỗi", description: "Nhập SĐT khách hàng", variant: "destructive" });
+   124→      return;
+   125→    }
+   126→    const validItems = items.filter((i) => i.name.trim() && parseInt(i.quantity) > 0 && parseInt(i.price) > 0);
+   127→    if (!validItems.length) {
+   128→      toast({ title: "Lỗi", description: "Nhập ít nhất 1 mặt hàng hợp lệ", variant: "destructive" });
+   129→      return;
+   130→    }
+   131→
+   132→    setSubmitting(true);
+   133→    try {
+   134→      const res = await fetch("/api/orders", {
+   135→        method: "POST",
+   136→        headers: { "Content-Type": "application/json" },
+   137→        body: JSON.stringify({
+   138→          phone: phone.trim(),
+   139→          customerName: customerName.trim(),
+   140→          sentTo: sentTo.trim() || phone.trim(),
+   141→          note: note.trim(),
+   142→          items: validItems,
+   143→        }),
+   144→      });
+   145→      const data = await res.json();
+   146→      if (!res.ok) throw new Error(data.error);
+   147→
+   148→      const orderId = data.order.id;
+   149→
+   150→      // Auto-send via Zalo if checked and logged in
+   151→      if (autoSend && loggedIn && sentTo.trim()) {
+   152→        try {
+   153→          const sendRes = await fetch("/api/orders/send", {
+   154→            method: "POST",
+   155→            headers: { "Content-Type": "application/json" },
+   156→            body: JSON.stringify({ orderId, toPhone: sentTo.trim() }),
+   157→          });
+   158→          const sendData = await sendRes.json();
+   159→          if (sendRes.ok) {
+   160→            toast({ title: "Đã lưu & gửi thành công", description: `Đơn ${formatVND(grandTotal)} đã gửi qua Zalo` });
+   161→          } else {
+   162→            toast({ title: "Đã lưu đơn, gửi Zalo thất bại", description: sendData.error, variant: "destructive" });
+   163→          }
+   164→        } catch {
+   165→          toast({ title: "Đã lưu đơn, gửi Zalo thất bại", description: "Không kết nối được Bot", variant: "destructive" });
+   166→        }
+   167→      } else {
+   168→        toast({ title: "Đã lưu đơn hàng", description: `Tổng: ${formatVND(grandTotal)}` });
+   169→      }
+   170→
+   171→      // Reset form
+   172→      setItems([{ name: "", quantity: "1", price: "" }]);
+   173→      setNote("");
+   174→      onCreated();
+   175→    } catch (err: any) {
+   176→      toast({ title: "Lỗi", description: err.message, variant: "destructive" });
+   177→    } finally {
+   178→      setSubmitting(false);
+   179→    }
+   180→  };
+   181→
+   182→  return (
+   183→    <Card>
+   184→      <CardHeader className="pb-3">
+   185→        <CardTitle className="text-base font-semibold flex items-center gap-2">
+   186→          <ShoppingCart className="h-4 w-4" />
+   187→          Tạo đơn hàng mới
+   188→        </CardTitle>
+   189→        <CardDescription className="text-xs">Nhập thông tin khách và mặt hàng, hệ thống tự tính tổng</CardDescription>
+   190→      </CardHeader>
+   191→      <CardContent className="space-y-4">
+   192→        {/* Customer info */}
+   193→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   194→          <div className="space-y-1.5">
+   195→            <Label className="text-xs font-medium">SĐT khách hàng *</Label>
+   196→            <Input
+   197→              placeholder="0912345678"
+   198→              value={phone}
+   199→              onChange={(e) => {
+   200→                setPhone(e.target.value);
+   201→                if (!sentTo) setSentTo(e.target.value);
+   202→              }}
+   203→              disabled={submitting}
+   204→            />
+   205→          </div>
+   206→          <div className="space-y-1.5">
+   207→            <Label className="text-xs font-medium">Tên khách hàng</Label>
+   208→            <Input
+   209→              placeholder="Nguyễn Văn A"
+   210→              value={customerName}
+   211→              onChange={(e) => setCustomerName(e.target.value)}
+   212→              disabled={submitting}
+   213→            />
+   214→          </div>
+   215→        </div>
+   216→
+   217→        <Separator />
+   218→
+   219→        {/* Items */}
+   220→        <div className="space-y-3">
+   221→          <div className="flex items-center justify-between">
+   222→            <Label className="text-xs font-medium">Mặt hàng *</Label>
+   223→            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={addItem} disabled={submitting}>
+   224→              <Plus className="h-3 w-3" /> Thêm hàng
+   225→            </Button>
+   226→          </div>
+   227→
+   228→          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+   229→            {items.map((item, idx) => {
+   230→              const lineTotal = (parseInt(item.quantity) || 0) * (parseInt(item.price) || 0);
+   231→              return (
+   232→                <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg border bg-background">
+   233→                  <span className="text-xs text-muted-foreground font-mono w-5 h-8 flex items-center justify-center flex-shrink-0 mt-1">
+   234→                    {idx + 1}
+   235→                  </span>
+   236→                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+   237→                    <Input
+   238→                      placeholder="Tên mặt hàng"
+   239→                      value={item.name}
+   240→                      onChange={(e) => updateItem(idx, "name", e.target.value)}
+   241→                      disabled={submitting}
+   242→                      className="h-8 text-sm"
+   243→                    />
+   244→                    <Input
+   245→                      type="number"
+   246→                      placeholder="Số lượng"
+   247→                      value={item.quantity}
+   248→                      onChange={(e) => updateItem(idx, "quantity", e.target.value)}
+   249→                      disabled={submitting}
+   250→                      className="h-8 text-sm"
+   251→                      min="1"
+   252→                    />
+   253→                    <div className="relative">
+   254→                      <Input
+   255→                        type="number"
+   256→                        placeholder="Đơn giá"
+   257→                        value={item.price}
+   258→                        onChange={(e) => updateItem(idx, "price", e.target.value)}
+   259→                        disabled={submitting}
+   260→                        className="h-8 text-sm pr-16"
+   261→                        min="0"
+   262→                      />
+   263→                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+   264→                        = {formatVND(lineTotal)}
+   265→                      </span>
+   266→                    </div>
+   267→                  </div>
+   268→                  <Button
+   269→                    variant="ghost"
+   270→                    size="icon"
+   271→                    className="h-8 w-8 flex-shrink-0 text-muted-foreground hover:text-destructive mt-1"
+   272→                    onClick={() => removeItem(idx)}
+   273→                    disabled={items.length <= 1 || submitting}
+   274→                  >
+   275→                    <Trash2 className="h-3.5 w-3.5" />
+   276→                  </Button>
+   277→                </div>
+   278→              );
+   279→            })}
+   280→          </div>
+   281→
+   282→          {/* Grand Total */}
+   283→          <div className="flex items-center justify-between p-3 rounded-lg bg-primary/5 border border-primary/20">
+   284→            <span className="text-sm font-semibold">TỔNG CỘNG</span>
+   285→            <span className="text-lg font-bold text-primary">{formatVND(grandTotal)}</span>
+   286→          </div>
+   287→        </div>
+   288→
+   289→        <Separator />
+   290→
+   291→        {/* Note + Send options */}
+   292→        <div className="space-y-3">
+   293→          <div className="space-y-1.5">
+   294→            <Label className="text-xs font-medium">Ghi chú</Label>
+   295→            <Textarea
+   296→              placeholder="Ghi chú cho đơn hàng..."
+   297→              value={note}
+   298→              onChange={(e) => setNote(e.target.value)}
+   299→              disabled={submitting}
+   300→              rows={2}
+   301→              className="resize-none text-sm"
+   302→            />
+   303→          </div>
+   304→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   305→            <div className="space-y-1.5">
+   306→              <Label className="text-xs font-medium">Gửi tin Zalo đến SĐT</Label>
+   307→              <Input
+   308→                placeholder="0912345678"
+   309→                value={sentTo}
+   310→                onChange={(e) => setSentTo(e.target.value)}
+   311→                disabled={submitting}
+   312→              />
+   313→            </div>
+   314→            <div className="flex items-center gap-2 pt-5">
+   315→              <input
+   316→                type="checkbox"
+   317→                id="auto-send"
+   318→                checked={autoSend}
+   319→                onChange={(e) => setAutoSend(e.target.checked)}
+   320→                disabled={!loggedIn || submitting}
+   321→                className="h-4 w-4 rounded border-gray-300 accent-primary"
+   322→              />
+   323→              <Label htmlFor="auto-send" className="text-xs">
+   324→                Tự động gửi qua Zalo sau khi lưu
+   325→              </Label>
+   326→            </div>
+   327→          </div>
+   328→        </div>
+   329→
+   330→        {/* Submit */}
+   331→        <Button className="w-full" onClick={handleSubmit} disabled={submitting || !phone.trim() || grandTotal === 0}>
+   332→          {submitting ? (
+   333→            <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Đang lưu...</>
+   334→          ) : (
+   335→            <><Package className="h-4 w-4 mr-2" /> Lưu đơn hàng</>
+   336→          )}
+   337→        </Button>
+   338→      </CardContent>
+   339→    </Card>
+   340→  );
+   341→}
+   342→
+   343→// Sub-tab: Danh sách đơn hàng
+   344→function OrderList({ onRefresh }: { onRefresh: () => void }) {
+   345→  const [orders, setOrders] = useState<Order[]>([]);
+   346→  const [loading, setLoading] = useState(true);
+   347→  const [search, setSearch] = useState("");
+   348→  const [expandedId, setExpandedId] = useState<string | null>(null);
+   349→  const [sendingId, setSendingId] = useState<string | null>(null);
+   350→  const [deleteId, setDeleteId] = useState<string | null>(null);
+   351→  const [sendPhone, setSendPhone] = useState("");
+   352→  const { toast } = useToast();
+   353→
+   354→  const fetchOrders = useCallback(async () => {
+   355→    setLoading(true);
+   356→    try {
+   357→      const res = await fetch(`/api/orders?phone=${encodeURIComponent(search)}&limit=50`);
+   358→      const data = await res.json();
+   359→      setOrders(data.orders || []);
+   360→    } catch {
+   361→      // ignore
+   362→    } finally {
+   363→      setLoading(false);
+   364→    }
+   365→  }, [search]);
+   366→
+   367→  useEffect(() => {
+   368→    fetchOrders();
+   369→  }, [fetchOrders]);
+   370→
+   371→  const handleSend = async (orderId: string) => {
+   372→    if (!sendPhone.trim()) {
+   373→      toast({ title: "Lỗi", description: "Nhập SĐT Zalo nhận tin", variant: "destructive" });
+   374→      return;
+   375→    }
+   376→    setSendingId(orderId);
+   377→    try {
+   378→      const res = await fetch("/api/orders/send", {
+   379→        method: "POST",
+   380→        headers: { "Content-Type": "application/json" },
+   381→        body: JSON.stringify({ orderId, toPhone: sendPhone.trim() }),
+   382→      });
+   383→      const data = await res.json();
+   384→      if (res.ok) {
+   385→        toast({ title: "Đã gửi", description: "Tin nhắn đã được gửi qua Zalo" });
+   386→        fetchOrders();
+   387→        onRefresh();
+   388→      } else {
+   389→        toast({ title: "Lỗi", description: data.error, variant: "destructive" });
+   390→      }
+   391→    } catch {
+   392→      toast({ title: "Lỗi", description: "Không kết nối được Bot", variant: "destructive" });
+   393→    } finally {
+   394→      setSendingId(null);
+   395→      setDeleteId(null);
+   396→    }
+   397→  };
+   398→
+   399→  const handleDelete = async (id: string) => {
+   400→    try {
+   401→      await fetch(`/api/orders/${id}`, { method: "DELETE" });
+   402→      toast({ title: "Đã xóa" });
+   403→      fetchOrders();
+   404→      onRefresh();
+   405→    } catch {
+   406→      toast({ title: "Lỗi", description: "Xóa thất bại", variant: "destructive" });
+   407→    }
+   408→    setDeleteId(null);
+   409→  };
+   410→
+   411→  return (
+   412→    <Card>
+   413→      <CardHeader className="pb-3">
+   414→        <div className="flex items-center justify-between">
+   415→          <CardTitle className="text-base font-semibold flex items-center gap-2">
+   416→            <FileText className="h-4 w-4" />
+   417→            Danh sách đơn hàng
+   418→            <Badge variant="secondary" className="text-xs">{orders.length}</Badge>
+   419→          </CardTitle>
+   420→          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={fetchOrders}>
+   421→            Làm mới
+   422→          </Button>
+   423→        </div>
+   424→        <div className="relative mt-2">
+   425→          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+   426→          <Input
+   427→            placeholder="Tìm theo SĐT khách..."
+   428→            value={search}
+   429→            onChange={(e) => setSearch(e.target.value)}
+   430→            className="pl-8 h-8 text-sm"
+   431→          />
+   432→        </div>
+   433→      </CardHeader>
+   434→      <CardContent>
+   435→        {loading ? (
+   436→          <div className="space-y-2">
+   437→            {[1, 2, 3].map((i) => (
+   438→              <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />
+   439→            ))}
+   440→          </div>
+   441→        ) : orders.length === 0 ? (
+   442→          <div className="text-center py-8 text-muted-foreground text-sm">
+   443→            <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
+   444→            Chưa có đơn hàng nào
+   445→          </div>
+   446→        ) : (
+   447→          <div className="space-y-2 max-h-[500px] overflow-y-auto">
+   448→            {orders.map((order) => (
+   449→              <div key={order.id} className="rounded-lg border p-3 space-y-2">
+   450→                {/* Header row */}
+   451→                <div
+   452→                  className="flex items-center justify-between cursor-pointer"
+   453→                  onClick={() => setExpandedId(expandedId === order.id ? null : order.id)}
+   454→                >
+   455→                  <div className="flex items-center gap-2.5">
+   456→                    <User className="h-4 w-4 text-muted-foreground" />
+   457→                    <div>
+   458→                      <p className="text-sm font-medium">{order.customer.name}</p>
+   459→                      <p className="text-[11px] text-muted-foreground">{order.customer.phone}</p>
+   460→                    </div>
+   461→                  </div>
+   462→                  <div className="flex items-center gap-2">
+   463→                    <span className="text-sm font-bold text-primary">{formatVND(order.totalAmount)}</span>
+   464→                    {expandedId === order.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+   465→                  </div>
+   466→                </div>
+   467→
+   468→                {/* Meta */}
+   469→                <div className="flex items-center gap-2 flex-wrap">
+   470→                  <span className="text-[10px] text-muted-foreground">
+   471→                    {new Date(order.createdAt).toLocaleString("vi-VN")}
+   472→                  </span>
+   473→                  {order.sentAt && (
+   474→                    <Badge variant="outline" className="text-[10px] h-5 gap-1 text-emerald-600 border-emerald-200">
+   475→                      <CheckCircle2 className="h-2.5 w-2.5" /> Đã gửi {order.sentTo}
+   476→                    </Badge>
+   477→                  )}
+   478→                  <span className="text-[10px] text-muted-foreground">
+   479→                    {order.items.length} mặt hàng
+   480→                  </span>
+   481→                </div>
+   482→
+   483→                {/* Expanded details */}
+   484→                {expandedId === order.id && (
+   485→                  <div className="pt-2 space-y-3">
+   486→                    <div className="rounded-md border overflow-hidden">
+   487→                      <table className="w-full text-xs">
+   488→                        <thead className="bg-muted/50">
+   489→                          <tr>
+   490→                            <th className="text-left p-2 font-medium">STT</th>
+   491→                            <th className="text-left p-2 font-medium">Mặt hàng</th>
+   492→                            <th className="text-right p-2 font-medium">SL</th>
+   493→                            <th className="text-right p-2 font-medium">Đơn giá</th>
+   494→                            <th className="text-right p-2 font-medium">Thành tiền</th>
+   495→                          </tr>
+   496→                        </thead>
+   497→                        <tbody>
+   498→                          {order.items.map((item, idx) => (
+   499→                            <tr key={item.id} className="border-t">
+   500→                              <td className="p-2 text-muted-foreground">{idx + 1}</td>
+   501→                              <td className="p-2">{item.name}</td>
+   502→                              <td className="p-2 text-right">{item.quantity}</td>
+   503→                              <td className="p-2 text-right">{formatVND(item.price)}</td>
+   504→                              <td className="p-2 text-right font-medium">{formatVND(item.total)}</td>
+   505→                            </tr>
+   506→                          ))}
+   507→                        </tbody>
+   508→                        <tfoot>
+   509→                          <tr className="border-t bg-primary/5">
+   510→                            <td colSpan={4} className="p-2 text-right font-semibold">Tổng:</td>
+   511→                            <td className="p-2 text-right font-bold text-primary">{formatVND(order.totalAmount)}</td>
+   512→                          </tr>
+   513→                        </tfoot>
+   514→                      </table>
+   515→                    </div>
+   516→                    {order.note && (
+   517→                      <p className="text-xs text-muted-foreground">📝 {order.note}</p>
+   518→                    )}
+   519→                    {/* Actions */}
+   520→                    <div className="flex items-center gap-2 pt-1">
+   521→                      <div className="flex-1 flex items-center gap-1.5">
+   522→                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+   523→                        <Input
+   524→                          placeholder="SĐT Zalo gửi đến"
+   525→                          className="h-7 text-xs"
+   526→                          value={sendPhone}
+   527→                          onChange={(e) => setSendPhone(e.target.value)}
+   528→                        />
+   529→                      </div>
+   530→                      <Button
+   531→                        size="sm"
+   532→                        className="h-7 text-xs"
+   533→                        onClick={() => handleSend(order.id)}
+   534→                        disabled={sendingId === order.id}
+   535→                      >
+   536→                        {sendingId === order.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+   537→                        Gửi Zalo
+   538→                      </Button>
+   539→                      <Button
+   540→                        variant="ghost"
+   541→                        size="sm"
+   542→                        className="h-7 text-xs text-destructive hover:text-destructive"
+   543→                        onClick={() => setDeleteId(order.id)}
+   544→                      >
+   545→                        <Trash2 className="h-3 w-3" />
+   546→                      </Button>
+   547→                    </div>
+   548→                  </div>
+   549→                )}
+   550→              </div>
+   551→            ))}
+   552→          </div>
+   553→        )}
+   554→
+   555→        {/* Delete confirm dialog */}
+   556→        <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+   557→          <DialogContent className="max-w-sm">
+   558→            <DialogHeader>
+   559→              <DialogTitle>Xóa đơn hàng?</DialogTitle>
+   560→            </DialogHeader>
+   561→            <p className="text-sm text-muted-foreground">Đơn hàng sẽ bị xóa vĩnh viễn. Bạn có chắc?</p>
+   562→            <DialogFooter className="gap-2">
+   563→              <Button variant="outline" size="sm" onClick={() => setDeleteId(null)}>Hủy</Button>
+   564→              <Button variant="destructive" size="sm" onClick={() => deleteId && handleDelete(deleteId)}>Xóa</Button>
+   565→            </DialogFooter>
+   566→          </DialogContent>
+   567→        </Dialog>
+   568→      </CardContent>
+   569→    </Card>
+   570→  );
+   571→}
+   572→
+   573→// Sub-tab: Tổng hợp khách hàng
+   574→function CustomerSummary({ onRefresh }: { onRefresh: () => void }) {
+   575→  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+   576→  const [grandTotal, setGrandTotal] = useState(0);
+   577→  const [loading, setLoading] = useState(true);
+   578→  const [search, setSearch] = useState("");
+   579→  const [sendingId, setSendingId] = useState<string | null>(null);
+   580→  const [sendPhone, setSendPhone] = useState("");
+   581→  const [expandedId, setExpandedId] = useState<string | null>(null);
+   582→  const { toast } = useToast();
+   583→
+   584→  const fetchSummary = useCallback(async () => {
+   585→    setLoading(true);
+   586→    try {
+   587→      const res = await fetch(`/api/orders/summary?phone=${encodeURIComponent(search)}`);
+   588→      const data = await res.json();
+   589→      setCustomers(data.customers || []);
+   590→      setGrandTotal(data.grandTotal || 0);
+   591→    } catch {
+   592→      // ignore
+   593→    } finally {
+   594→      setLoading(false);
+   595→    }
+   596→  }, [search]);
+   597→
+   598→  useEffect(() => {
+   599→    fetchSummary();
+   600→  }, [fetchSummary]);
+   601→
+   602→  const handleSendSummary = async (customerId: string) => {
+   603→    if (!sendPhone.trim()) {
+   604→      toast({ title: "Lỗi", description: "Nhập SĐT Zalo nhận tin", variant: "destructive" });
+   605→      return;
+   606→    }
+   607→    setSendingId(customerId);
+   608→    try {
+   609→      const res = await fetch("/api/orders/send", {
+   610→        method: "POST",
+   611→        headers: { "Content-Type": "application/json" },
+   612→        body: JSON.stringify({ customerId, toPhone: sendPhone.trim() }),
+   613→      });
+   614→      const data = await res.json();
+   615→      if (res.ok) {
+   616→        toast({ title: "Đã gửi", description: "Bảng tổng hợp đã được gửi qua Zalo" });
+   617→      } else {
+   618→        toast({ title: "Lỗi", description: data.error, variant: "destructive" });
+   619→      }
+   620→    } catch {
+   621→      toast({ title: "Lỗi", description: "Không kết nối được Bot", variant: "destructive" });
+   622→    } finally {
+   623→      setSendingId(null);
+   624→    }
+   625→  };
+   626→
+   627→  return (
+   628→    <Card>
+   629→      <CardHeader className="pb-3">
+   630→        <div className="flex items-center justify-between">
+   631→          <CardTitle className="text-base font-semibold flex items-center gap-2">
+   632→            <Users className="h-4 w-4" />
+   633→            Tổng hợp khách hàng
+   634→          </CardTitle>
+   635→          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={fetchSummary}>
+   636→            Làm mới
+   637→          </Button>
+   638→        </div>
+   639→        <div className="relative mt-2">
+   640→          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+   641→          <Input
+   642→            placeholder="Tìm theo SĐT..."
+   643→            value={search}
+   644→            onChange={(e) => setSearch(e.target.value)}
+   645→            className="pl-8 h-8 text-sm"
+   646→          />
+   647→        </div>
+   648→
+   649→        {/* Grand total card */}
+   650→        <div className="grid grid-cols-2 gap-2 mt-3">
+   651→          <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-center">
+   652→            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">Tổng tiền hàng</div>
+   653→            <div className="text-lg font-bold text-primary mt-0.5">{formatVND(grandTotal)}</div>
+   654→          </div>
+   655→          <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
+   656→            <div className="text-[10px] text-emerald-600 uppercase tracking-wide">Tổng khách hàng</div>
+   657→            <div className="text-lg font-bold text-emerald-700 mt-0.5">{customers.length}</div>
+   658→          </div>
+   659→        </div>
+   660→      </CardHeader>
+   661→      <CardContent>
+   662→        {loading ? (
+   663→          <div className="space-y-2">
+   664→            {[1, 2, 3].map((i) => (
+   665→              <div key={i} className="h-20 rounded-lg bg-muted animate-pulse" />
+   666→            ))}
+   667→          </div>
+   668→        ) : customers.length === 0 ? (
+   669→          <div className="text-center py-8 text-muted-foreground text-sm">
+   670→            <Users className="h-10 w-10 mx-auto mb-2 opacity-30" />
+   671→            Chưa có khách hàng nào
+   672→          </div>
+   673→        ) : (
+   674→          <div className="space-y-2 max-h-[500px] overflow-y-auto">
+   675→            {customers.map((c) => (
+   676→              <div key={c.id} className="rounded-lg border p-3 space-y-2">
+   677→                <div
+   678→                  className="flex items-center justify-between cursor-pointer"
+   679→                  onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
+   680→                >
+   681→                  <div className="flex items-center gap-2.5">
+   682→                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+   683→                      <User className="h-4 w-4 text-primary" />
+   684→                    </div>
+   685→                    <div>
+   686→                      <p className="text-sm font-medium">{c.name}</p>
+   687→                      <p className="text-[11px] text-muted-foreground">{c.phone}</p>
+   688→                    </div>
+   689→                  </div>
+   690→                  <div className="text-right">
+   691→                    <p className="text-sm font-bold text-primary">{formatVND(c.totalSpent)}</p>
+   692→                    <p className="text-[10px] text-muted-foreground">{c.totalOrders} đơn</p>
+   693→                  </div>
+   694→                </div>
+   695→
+   696→                {expandedId === c.id && (
+   697→                  <div className="pt-2 space-y-2">
+   698→                    <div className="grid grid-cols-3 gap-2">
+   699→                      <div className="text-center p-2 rounded bg-muted/50">
+   700→                        <div className="text-xs font-bold">{c.totalOrders}</div>
+   701→                        <div className="text-[10px] text-muted-foreground">Đơn hàng</div>
+   702→                      </div>
+   703→                      <div className="text-center p-2 rounded bg-emerald-50">
+   704→                        <div className="text-xs font-bold text-emerald-700">{formatVND(c.totalSpent)}</div>
+   705→                        <div className="text-[10px] text-emerald-600">Tổng tiền</div>
+   706→                      </div>
+   707→                      <div className="text-center p-2 rounded bg-amber-50">
+   708→                        <div className="text-xs font-bold text-amber-700">{formatVND(c.lastOrderAmount)}</div>
+   709→                        <div className="text-[10px] text-amber-600">Đơn gần nhất</div>
+   710→                      </div>
+   711→                    </div>
+   712→
+   713→                    {/* Send summary action */}
+   714→                    <div className="flex items-center gap-2 pt-1">
+   715→                      <div className="flex-1 flex items-center gap-1.5">
+   716→                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+   717→                        <Input
+   718→                          placeholder="SĐT Zalo gửi đến"
+   719→                          className="h-7 text-xs"
+   720→                          value={sendPhone}
+   721→                          onChange={(e) => setSendPhone(e.target.value)}
+   722→                        />
+   723→                      </div>
+   724→                      <Button
+   725→                        size="sm"
+   726→                        className="h-7 text-xs"
+   727→                        onClick={() => handleSendSummary(c.id)}
+   728→                        disabled={sendingId === c.id}
+   729→                      >
+   730→                        {sendingId === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageSquare className="h-3 w-3 mr-1" />}
+   731→                        Gửi tổng hợp
+   732→                      </Button>
+   733→                    </div>
+   734→                  </div>
+   735→                )}
+   736→              </div>
+   737→            ))}
+   738→          </div>
+   739→        )}
+   740→      </CardContent>
+   741→    </Card>
+   742→  );
+   743→}
+   744→
+   745→// ---- Main Panel ----
+   746→export function OrderPanel({ loggedIn }: OrderPanelProps) {
+   747→  const [subTab, setSubTab] = useState<"create" | "list" | "summary">("create");
+   748→  const [refreshKey, setRefreshKey] = useState(0);
+   749→
+   750→  const triggerRefresh = () => setRefreshKey((k) => k + 1);
+   751→
+   752→  return (
+   753→    <div className="space-y-4" key={refreshKey}>
+   754→      {/* Sub-tabs */}
+   755→      <div className="flex gap-1 p-1 rounded-lg bg-muted/50">
+   756→        <button
+   757→          onClick={() => setSubTab("create")}
+   758→          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+   759→            subTab === "create" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+   760→          }`}
+   761→        >
+   762→          <Plus className="h-3.5 w-3.5" /> Tạo đơn
+   763→        </button>
+   764→        <button
+   765→          onClick={() => setSubTab("list")}
+   766→          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+   767→            subTab === "list" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+   768→          }`}
+   769→        >
+   770→          <FileText className="h-3.5 w-3.5" /> Danh sách
+   771→        </button>
+   772→        <button
+   773→          onClick={() => setSubTab("summary")}
+   774→          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+   775→            subTab === "summary" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+   776→          }`}
+   777→        >
+   778→          <TrendingUp className="h-3.5 w-3.5" /> Tổng hợp
+   779→        </button>
+   780→      </div>
+   781→
+   782→      {subTab === "create" && <CreateOrderForm loggedIn={loggedIn} onCreated={triggerRefresh} />}
+   783→      {subTab === "list" && <OrderList onRefresh={triggerRefresh} />}
+   784→      {subTab === "summary" && <CustomerSummary onRefresh={triggerRefresh} />}
+   785→    </div>
+   786→  );
+   787→}
+   788→

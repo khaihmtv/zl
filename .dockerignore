@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+dev.log
+server.log
+*.zip
+upload/
+mini-services/
+examples/
+skills/
+download/
+.DS_Store
+*.md
